@@ -16,87 +16,63 @@ from datetime import datetime
 from datetime import timedelta
 
 
-#------------------------------------------------------------------------
-'''
-Todo: Create file window or pull from URL
-      Think of ways of logging output in a meaningful fashion
-      Try additional transformations and preprocessing
-
-      import Tkinter,tkFileDialog
-        root = Tkinter.Tk()
-        file = tkFileDialog.askopenfile(parent=root,mode='rb',title='Choose a file')
-        if file != None:
-            data = file.read()
-            file.close()
-            print "I got %d bytes from this file." % len(data)
-
-'''
-
-
-
-
-
-
-#------------------------------------------------------------------------
-os.chdir(r"C:\Users\Trevor\Google Drive\docs\website\python time series")
-data = pd.read_csv(r'ADM_problem_set_dataset.csv', parse_dates=['Date'], index_col='Date')
+#Grab data from github and parse date column
+url = r'https://raw.githubusercontent.com/tkoon107/py_timeseries/master/ADM_problem_set_dataset.csv'
+data = pd.read_csv(url, parse_dates=['Date'], index_col='Date')
 
 #Add daily frequency to time_index to create timeseries for each product
 prev_index = data.index
 time_index = pd.date_range(start=prev_index[0].strftime('%m/%d/%Y'), periods=len(prev_index), freq='D')
-days = list(range(len(time_index)))
+product_array = data.values
 
-product_array = np.nan_to_num(data.values)
-#products_array = data.values[data.values == 0] = min(data.values[data.values != 0])
+series = pd.Series(product, time_index)
+plt.plot(series)
+#    series.replace(0, median_val, inplace=True)
 
-series_dict = {}
+#group by week
+series_weeks = series.groupby(pd.Grouper(freq='W')).sum()[:-1] #omitting the last week as it only contained 2 days
+series_weeks_test = series_weeks[-8:] #last 2 months which will be be predicted
+series_weeks.drop(series_weeks.index[-8:], inplace=True)
+plt.plot(series_weeks)
 
-#Create  a series object for each product
-i = 0
+#Dickey-Fuller Test for stationality
+#If critical value less than test statistic we fail to reject null hypothesis that series is NOT stationary
+dftest = adfuller(series, autolag='AIC')
+ 
+#using an estimated moving average to detrend the series
+series_detrend =  series_weeks - series_weeks.ewm(halflife=8).mean()
+plt.plot(series_detrend)
 
-for product in product_array.T: 
-    median_val = np.median(product[product != 0])
-    series_dict[i] = pd.Series(product, time_index)
-    #replace zeroes with the min value of series
-    series_dict[i].replace(0, median_val, inplace=True)
-    i += 1
-'''for product in product_array.T:
-    series_dict[i] = pd.Series(product, time_index)
-    series_dict[i][series_dict[i] == 0] = np.min(series_dict[i][series_dict[i] != 0])#Replace zeroes with min value of np.array
-    series_dict[i]
-    i += 1'''
-    
+adfuller(series_detrend, autolag='AIC')
+#Afer removing the exponentially weighted mean from each value the adfuller test shows we are 95% confident the series is stationary
+#After reviewing the plot there does seem to be some seasonality to the dataset we can plot the variance across time to see this
+series_detrend_std_deviation = series_detrend.rolling(window=8,center = False).std()
 
-    
 
-#plot a few products
-%matplotlib auto
-plt.subplot(3, 1, 1)
-plt.plot(series_dict[100])
-plt.subplot(3, 1, 2)
-plt.plot(series_dict[200])
-plt.subplot(3, 1, 3)
-plt.plot(series_dict[300])
+plt.plot(series_detrend, color = 'blue')
+plt.plot(series_detrend_std_deviation ,color = 'orange')
 
-#Construct model
 
-#preprocessing
-test_series = series_dict[0]
+#test diff
+series_diff_detrend = (series_detrend - series_detrend.shift()).dropna()
+series_diff_detrend_std_deviation = series_diff_detrend.rolling(window=8).std()
 
-#Dickey-Fuller Test
-dftest = adfuller(test_series, autolag='AIC')
+plt.plot(series_diff_detrend, color = 'blue')
+plt.plot(series_diff_detrend_std_deviation ,color = 'orange')
 
-test_series_detrend = test_series - pd.ewma(test_series, span=12)
-dftest2 = adfuller(test_series_detrend, autolag='AIC')
+adfuller(series_diff_detrend, autolag='AIC') #Well below 1% percentile critical value, will consider this to be stationary
 
-test_series_ma_detrend = (test_series - pd.rolling_mean(test_series, 12)).dropna()
-dftest3 = adfuller(test_series_ma_detrend, autolag='AIC')
 
+#Forecast
+
+arima_model = ARIMA(series_diff_detrend, order = (2, 1, 2))
+results = arima_model.fit()
+plt.plot(results.fittedvalues)
+plt.plot(series_diff_detrend)
+
+monthly_forecast = arima_model.forecast(steps=4)
 
 #differencing
-
-
-
 #ACF
 
 critical_values = [-1.96/np.sqrt(len(test_series)), 1.96/np.sqrt(len(test_series))]
@@ -108,7 +84,7 @@ for i, lag in enumerate(lag_acf):
         p = i
         break
 #PACF
-lag_pacf = pacf(test_series, nlags=20, method='ols')
+lag_pacf = pacf(series, nlags=20, method='ols')
 d = None
 for i, lag in enumerate(lag_pacf):
     print(i,lag)
@@ -128,6 +104,7 @@ ending_index = days[-1]
 
 arima_model = ARIMA(test_series_detrend, order = (19,1,3))
 fitted_model = arima_model.fit(transparams = False)
+
 
 monthly_forecast = fitted_model.forecast(steps=30)
 plt.plot(monthly_forecast[0])
