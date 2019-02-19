@@ -32,28 +32,36 @@ series_weeks_full = series.groupby(pd.Grouper(freq='W')).sum()[:-1] #omitting th
 series_weeks = series_weeks_full.drop(series_weeks_full.index[-4:], inplace=False)
 plt.plot(series_weeks)
 
+#plot mean and standard deviation
+series_weeks_sd = series_weeks_full.rolling(window=8,center = False).std()
+series_weeks_mean = series_weeks_full.rolling(window=8,center = False).mean()
+
+plt.plot(series_weeks_sd, color='orange')
+plt.plot(series_weeks_mean, color='green')
+plt.plot(series_weeks, color='blue')
+
+
+
 #Dickey-Fuller Test for statoinarity
 #If critical value less than test statistic we fail to reject null hypothesis that series is NOT stationary
 adfuller(series_weeks, autolag='AIC')
  
-#using a log transformation and estimated moving average to detrend the series
+#using a log transformation and exponentially moving average to detrend the series
+series_log = np.log(series_weeks)
+trend_of_log_transform = series_log.ewm(halflife=8).mean()
+series_log_detrend = series_log - trend_of_log_transform
 
-series_log_detrend = np.log(series_weeks) - np.log(series_weeks).ewm(halflife=8).mean()
-plt.plot(series_log_detrend)
-adfuller(series_log_detrend)
-
-series_detrend =  series_weeks - series_weeks.ewm(halflife=8).mean()
-plt.plot(series_detrend)
+plt.plot(series_log_detrend, color='blue')
 
 adfuller(series_log_detrend, autolag='AIC')
 #Afer removing the exponentially weighted mean from each value the adfuller test shows we are 95% confident the series is stationary
 #After reviewing the plot there does seem to be some seasonality to the dataset we can plot the variance across time to see this
-series_log_detrend_sd = series_log_detrend_sd.rolling(window=8,center = False).std()
+series_log_detrend_sd = series_log_detrend.rolling(window=8,center = False).std()
 
 plt.plot(series_log_detrend, color = 'blue')
-plt.plot(series_log_detrend ,color = 'orange')
+plt.plot(series_log_detrend_sd ,color = 'orange')
 
-#test diff
+'''test diff
 series_diff_detrend = (series_detrend - series_detrend.shift()).dropna()
 series_diff_detrend_std_deviation = series_diff_detrend.rolling(window=8).std()
 
@@ -61,6 +69,7 @@ plt.plot(series_diff_detrend, color = 'blue')
 plt.plot(series_diff_detrend_std_deviation ,color = 'orange')
 
 adfuller(series_diff_detrend, autolag='AIC') #Well below 1% percentile critical value, will consider this to be stationary
+'''
 
 #Test autocorrelation between different lags with acf and pacf
 
@@ -92,28 +101,17 @@ plt.plot(series_log_detrend)
 plt.plot(results.fittedvalues)
 
 monthly_forecast = results.forecast(steps=4)
-
-
+forecast_values = monthly_forecast[0]
 
 forecast_time_index = pd.date_range(series_log_detrend.index[-1] + pd.DateOffset(weeks=1), periods=4, freq='W')
 
 #Reverse log transformation and ewa 
-monthly_forecast = np.exp(monthly_forecast[0]) + series_weeks.ewm(halflife=8).mean()[-4:]
+forecast_values = np.exp(forecast_values + trend_of_log_transform[-4:].values)
+series_weeks_r = np.exp(series_log_detrend + trend_of_log_transform)
 
 #Add forecast values to series
-series_forecast_test = series_log_detrend.append(pd.Series(monthly_forecast, index = forecast_time_index))
+series_forecast_test = series_weeks_r.append(pd.Series(forecast_values, index = forecast_time_index))
 
 #Compare forecasted series to actual series
-plt.plot(forecasted_series)
-
-#differencing
-#ACF
-
-
-#printout = test_series_decomp.plot()
-#plot_mpl(printout)
-
-
-
-#INVERSE OUTPUT
-inversed_back = monthly_forecast[0] + pd.ewma(test_series, halflife=12)
+plt.plot(series_forecast_test[-8:], color = 'orange')
+plt.plot(series_weeks_full[-8:], color = 'blue')
